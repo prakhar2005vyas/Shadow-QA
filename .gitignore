@@ -1,0 +1,47 @@
+# Secrets — never commit
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+.eggs/
+
+# pytest / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# SQLite databases
+*.db
+*.sqlite
+
+# Node / frontend
+node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Docker
+.docker/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Playwright
+test-results/
+playwright-report/

@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Acme Corp — The Future of Everything</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- ================================================================
+       NAVIGATION
+       ================================================================ -->
+  <nav class="navbar">
+    <div class="nav-brand">AcmeCorp</div>
+    <ul class="nav-links">
+      <li><a href="index.html">Home</a></li>
+      <li><a href="index.html#features">Features</a></li>
+      <li><a href="index.html#contact">Contact</a></li>
+      <!-- BUG #4 (dead_link): /privacy.html does not exist -->
+      <li><a id="privacy-link" href="/privacy.html">Privacy Policy</a></li>
+    </ul>
+  </nav>
+
+  <!-- ================================================================
+       HERO SECTION
+       BUG #3 (visual_layout): width:120vw — see style.css .hero
+       BUG #7 (other): src points to a non-existent file
+       ================================================================ -->
+  <section class="hero">
+    <div class="hero-content">
+      <h1>Build Faster. Break Less. Ship with Confidence.</h1>
+      <p class="hero-sub">
+        Acme Corp delivers enterprise-grade solutions for teams that move fast.
+        Trusted by zero companies worldwide.
+      </p>
+      <!-- BUG #1 (broken_interaction): handleSubmit is never defined -->
+      <button id="submit-btn" onclick="handleSubmit()">Get Started Free</button>
+    </div>
+    <!-- BUG #7: /assets/hero-photo.png does not exist → broken image -->
+    <img id="hero-img" src="/assets/hero-photo.png" alt="Happy team working" class="hero-img" />
+  </section>
+
+  <!-- ================================================================
+       FEATURES SECTION
+       ================================================================ -->
+  <section id="features" class="features">
+    <h2>Why AcmeCorp?</h2>
+    <div class="feature-grid">
+      <div class="feature-card">
+        <span class="feature-icon">🚀</span>
+        <h3>Lightning Fast</h3>
+        <p>Deploy in seconds, not hours.</p>
+      </div>
+      <div class="feature-card">
+        <span class="feature-icon">🔒</span>
+        <h3>Secure by Default</h3>
+        <p>Enterprise-grade security baked in.</p>
+      </div>
+      <div class="feature-card">
+        <span class="feature-icon">📊</span>
+        <h3>Deep Analytics</h3>
+        <p>Insights that actually make sense.</p>
+      </div>
+    </div>
+
+    <!-- BUG #5 (broken_interaction): looks enabled, onclick calls a silent no-op -->
+    <button id="load-more-btn" class="btn-primary" onclick="loadMoreNoOp()">Load More Features</button>
+    <!-- BUG #8 (accessibility): low-contrast caption -->
+    <p class="caption">Updated daily — data reflects last 30 days of product activity.</p>
+  </section>
+
+  <!-- ================================================================
+       LOGIN FORM
+       BUG #6 (accessibility): label for="user-email" but input id="email-field"
+                                label for="user-pass"  but input id="pass-field"
+       ================================================================ -->
+  <section id="login" class="login-section">
+    <h2>Sign In</h2>
+    <form class="login-form" method="post" action="/api/login">
+      <div class="form-group">
+        <!-- for="user-email" ≠ id="email-field" → BUG #6 -->
+        <label for="user-email">Email address</label>
+        <input type="email" id="email-field" name="email" placeholder="you@example.com" />
+      </div>
+      <div class="form-group">
+        <!-- for="user-pass" ≠ id="pass-field" → BUG #6 -->
+        <label for="user-pass">Password</label>
+        <input type="password" id="pass-field" name="password" placeholder="••••••••" />
+      </div>
+      <button type="submit" class="btn-primary">Sign In</button>
+    </form>
+  </section>
+
+  <!-- ================================================================
+       CONTACT FORM
+       BUG #2 (error_state): /api/contact returns 404 (route doesn't exist)
+       ================================================================ -->
+  <section id="contact" class="contact-section">
+    <h2>Get in Touch</h2>
+    <form class="contact-form" method="post" action="/api/contact">
+      <input type="text" name="name" placeholder="Your name" />
+      <input type="email" name="email" placeholder="your@email.com" />
+      <textarea name="message" rows="4" placeholder="Tell us what you need..."></textarea>
+      <button type="submit" class="btn-primary">Send Message</button>
+    </form>
+    <!-- BUG #9 (broken_interaction): disabled attribute set but btn-primary has no
+         :disabled styling — identical appearance to an active button, silent failure -->
+    <button id="export-btn" class="btn-primary" disabled>Export as PDF Report</button>
+  </section>
+
+  <!-- ================================================================
+       FOOTER
+       BUG #8 (accessibility): .footer-text uses #c0c0c0 on white — see style.css
+       ================================================================ -->
+  <footer class="footer">
+    <p class="footer-text">© 2026 AcmeCorp Inc. All rights reserved.</p>
+    <p class="footer-text">
+      <!-- BUG #4 also appears here -->
+      <a id="privacy-link-footer" href="/privacy.html">Privacy Policy</a> ·
+      <a href="/terms.html">Terms of Service</a> ·
+      <a href="index.html">Home</a>
+    </p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

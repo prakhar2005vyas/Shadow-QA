@@ -1,0 +1,136 @@
+/* ================================================================
+   Fixture App Styles — AcmeCorp demo site
+   BUGS SEEDED IN THIS FILE:
+     #3  .hero { width: 120vw } — horizontal overflow
+     #8  .caption, .footer-text { color: #c0c0c0 } — low contrast
+   ================================================================ */
+
+/* --- Reset & base --- */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'Segoe UI', Arial, sans-serif;
+  background: #ffffff;
+  color: #1a1a1a;
+  line-height: 1.6;
+}
+
+/* --- Navbar --- */
+.navbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 2rem;
+  height: 60px;
+  background: #1a1a2e;
+  color: #fff;
+}
+.nav-brand { font-weight: 700; font-size: 1.3rem; }
+.nav-links  { display: flex; gap: 1.5rem; list-style: none; }
+.nav-links a { color: #ccc; text-decoration: none; }
+.nav-links a:hover { color: #fff; }
+
+/* --- Hero section ---
+   BUG #3 (visual_layout): width: 120vw causes horizontal overflow.
+   No overflow: hidden on a parent traps the scroll.
+   ---------------------------------------------------------------- */
+.hero {
+  width: 120vw;                /* ← BUG #3: overflows viewport */
+  min-height: 400px;
+  display: flex;
+  align-items: center;
+  gap: 2rem;
+  padding: 3rem 2rem;
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+  color: #fff;
+}
+.hero-content { flex: 1; }
+.hero-content h1 { font-size: 2rem; margin-bottom: 1rem; }
+.hero-sub { color: #aaa; margin-bottom: 1.5rem; }
+.hero-img { width: 300px; height: 220px; object-fit: cover; border-radius: 8px; }
+
+/* --- Buttons ---
+   BUG #5 (broken_interaction): #load-more-btn looks identical to a working button
+   (full colour, cursor:pointer, no disabled attr) but its onclick is a silent no-op.
+   ---------------------------------------------------------------- */
+.btn-primary {
+  display: inline-block;
+  padding: 0.75rem 1.75rem;
+  background: #e94560;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  /* No cursor:not-allowed for :disabled, no opacity change — BUG #5 */
+}
+.btn-primary:hover { background: #c73652; }
+/* Intentionally NO:  .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; } */
+
+/* --- Features --- */
+.features {
+  padding: 3rem 2rem;
+  text-align: center;
+  max-width: 960px;
+  margin: 0 auto;
+}
+.features h2 { margin-bottom: 2rem; font-size: 1.8rem; }
+.feature-grid { display: flex; gap: 1.5rem; flex-wrap: wrap; justify-content: center; margin-bottom: 2rem; }
+.feature-card { background: #f5f5f5; border-radius: 10px; padding: 1.5rem; width: 240px; }
+.feature-icon { font-size: 2rem; }
+.feature-card h3 { margin: 0.5rem 0 0.3rem; }
+.feature-card p  { font-size: 0.9rem; color: #555; }
+
+/* BUG #8 (accessibility): color #c0c0c0 on white background.
+   Contrast ratio ≈ 2.3:1. WCAG AA requires 4.5:1 for normal text.
+   ---------------------------------------------------------------- */
+.caption {
+  color: #c0c0c0;             /* ← BUG #8 */
+  font-size: 0.85rem;
+  margin-top: 1rem;
+}
+
+/* --- Login section --- */
+.login-section { padding: 2rem; max-width: 400px; margin: 0 auto; }
+.login-section h2 { margin-bottom: 1rem; }
+.login-form { display: flex; flex-direction: column; gap: 1rem; }
+.form-group { display: flex; flex-direction: column; gap: 0.3rem; }
+.form-group label { font-weight: 600; font-size: 0.9rem; }
+.form-group input {
+  padding: 0.6rem 0.8rem;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 1rem;
+}
+
+/* --- Contact section --- */
+.contact-section { padding: 2rem; max-width: 600px; margin: 0 auto; }
+.contact-section h2 { margin-bottom: 1rem; }
+.contact-form { display: flex; flex-direction: column; gap: 0.8rem; }
+.contact-form input,
+.contact-form textarea {
+  padding: 0.6rem 0.8rem;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 1rem;
+  font-family: inherit;
+}
+.contact-form textarea { resize: vertical; }
+
+/* --- Footer ---
+   BUG #8: .footer-text also uses low-contrast #c0c0c0 on white.
+   ---------------------------------------------------------------- */
+.footer {
+  background: #f9f9f9;
+  padding: 1.5rem 2rem;
+  text-align: center;
+  margin-top: 3rem;
+  border-top: 1px solid #eee;
+}
+.footer-text {
+  color: #c0c0c0;             /* ← BUG #8 */
+  font-size: 0.85rem;
+  margin-bottom: 0.4rem;
+}
+.footer-text a { color: #c0c0c0; text-decoration: underline; }
