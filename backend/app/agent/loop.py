@@ -27,7 +27,7 @@ from datetime import datetime
 from sqlmodel import Session
 
 from ..config import settings
-from ..models import Run, Finding
+from ..models import Run, Finding, Step
 from .browser import BrowserSession
 from .vlm_client import call_vlm
 from .schemas import NextAction
@@ -138,6 +138,19 @@ async def run_agent(run_id: int, target_url: str, db_session: Session) -> None:
                 if is_inconclusive:
                     logger.warning("Run %d step %d is inconclusive — continuing", run_id, step_index)
                     action_history.append(f"step {step_index}: [inconclusive — VLM error]")
+                    db_session.add(
+                        Step(
+                            run_id=run_id,
+                            step_num=step_index,
+                            observation=agent_step.observation,
+                            is_anomaly=False,
+                            action_type=agent_step.next_action.type,
+                            action_selector=agent_step.next_action.selector,
+                            action_reason=agent_step.next_action.reason,
+                            screenshot_b64=screenshot_b64,
+                        )
+                    )
+                    db_session.commit()
                     continue
 
                 # d. record finding if an anomaly was detected
@@ -175,6 +188,23 @@ async def run_agent(run_id: int, target_url: str, db_session: Session) -> None:
                 )
                 if action.selector:
                     tried_selectors.add(action.selector)
+
+                # d2. persist this step (every step, not just anomaly ones) so the
+                # live agent view can poll step-by-step progress while the run is
+                # still in progress — Finding alone only covers anomaly steps.
+                db_session.add(
+                    Step(
+                        run_id=run_id,
+                        step_num=step_index,
+                        observation=agent_step.observation,
+                        is_anomaly=agent_step.anomaly is not None,
+                        action_type=action.type,
+                        action_selector=action.selector,
+                        action_reason=action.reason,
+                        screenshot_b64=screenshot_b64,
+                    )
+                )
+                db_session.commit()
 
                 # f. stop if requested
                 if action.type == "stop":

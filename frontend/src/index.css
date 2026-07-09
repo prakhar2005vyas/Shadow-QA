@@ -1,12 +1,10 @@
-* {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-}
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-body {
-  font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
-  background: #0d1117;
-  color: #e6edf3;
-  min-height: 100vh;
+@layer base {
+  body {
+    @apply bg-bg text-text min-h-screen;
+    font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
+  }
 }

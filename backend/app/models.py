@@ -21,6 +21,31 @@ class Run(SQLModel, table=True):
     total_steps: int = Field(default=0)
 
     findings: List["Finding"] = Relationship(back_populates="run")
+    steps: List["Step"] = Relationship(back_populates="run")
+
+
+class Step(SQLModel, table=True):
+    """
+    A single perceive-decide-act step from the agent loop, persisted regardless of
+    whether it produced an anomaly. This is what the live agent view polls — Finding
+    only captures anomaly steps, which isn't enough to show step-by-step commentary
+    as the loop runs.
+    """
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    run_id: int = Field(foreign_key="run.id", index=True)
+    step_num: int
+    observation: str
+    is_anomaly: bool = Field(default=False)
+    action_type: str
+    action_selector: Optional[str] = None
+    action_reason: str
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+    # Screenshot stored as base64-encoded PNG, same convention as Finding.screenshot_b64
+    screenshot_b64: Optional[str] = Field(default=None)
+
+    run: Optional[Run] = Relationship(back_populates="steps")
 
 
 class Finding(SQLModel, table=True):

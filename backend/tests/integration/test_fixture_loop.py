@@ -18,7 +18,7 @@ from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.agent.loop import run_agent
 from app.config import settings
-from app.models import Finding, Report, Run
+from app.models import Finding, Report, Run, Step
 
 
 # ---------------------------------------------------------------------------
@@ -128,6 +128,18 @@ async def test_loop_finds_at_least_three_bugs(fixture_server, db_session, monkey
     assert len(categories) >= 2, (
         f"Expected findings from ≥ 2 categories, got: {categories}"
     )
+
+    # Every step (not just anomaly ones) must be persisted for the live agent view
+    steps = list(
+        db_session.exec(select(Step).where(Step.run_id == run.id)).all()
+    )
+    assert len(steps) == run_after.total_steps, (
+        f"Expected {run_after.total_steps} persisted steps, got {len(steps)}"
+    )
+    assert sum(1 for s in steps if s.is_anomaly) == len(findings), (
+        "Step.is_anomaly count must match the number of Findings recorded"
+    )
+    assert all(s.screenshot_b64 for s in steps), "Every step must have a screenshot"
 
 
 async def test_loop_generates_reports(fixture_server, db_session, monkeypatch):

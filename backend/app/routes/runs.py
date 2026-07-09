@@ -1,20 +1,24 @@
 """
 Runs API routes.
 
-POST /runs       — create a new run (kicks off agent in background)
-GET  /runs       — list all runs
-GET  /runs/{id}  — get run details with findings and reports
+POST /runs                                          — create a new run (kicks off agent in background)
+GET  /runs                                           — list all runs
+GET  /runs/{id}                                      — get run details with findings and reports
+GET  /runs/{id}/steps                                — step-by-step feed for the live agent view
+GET  /runs/{id}/steps/{step_num}/screenshot          — raw PNG bytes for a step's screenshot
+GET  /runs/{id}/findings/{finding_id}/screenshot     — raw PNG bytes for a finding's screenshot
 """
 
+import base64
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from ..db import engine, get_session
-from ..models import Finding, Report, Run
+from ..models import Finding, Report, Run, Step
 from ..security.url_guard import SSRFError, check_url
 
 logger = logging.getLogger(__name__)
@@ -49,6 +53,16 @@ class RunResponse(BaseModel):
     total_steps: int
     findings: list[FindingResponse] = []
     error_msg: Optional[str] = None
+
+
+class StepResponse(BaseModel):
+    step_num: int
+    observation: str
+    is_anomaly: bool
+    action_type: str
+    action_selector: Optional[str] = None
+    action_reason: str
+    has_screenshot: bool
 
 
 # ---------------------------------------------------------------------------
@@ -101,6 +115,66 @@ def get_run(run_id: int, session: Session = Depends(get_session)) -> RunResponse
     if not run:
         raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
     return _run_to_response(run, _get_findings(run_id, session), session)
+
+
+@router.get("/{run_id}/steps", response_model=list[StepResponse])
+def get_run_steps(run_id: int, session: Session = Depends(get_session)) -> list[StepResponse]:
+    """
+    Step-by-step feed for the live agent view. Every step is included, not just
+    anomaly ones — poll this while a run's status is 'running' to show screenshots
+    and running commentary as the loop executes.
+    """
+    run = session.get(Run, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+
+    steps = session.exec(
+        select(Step).where(Step.run_id == run_id).order_by(Step.step_num)
+    ).all()
+    return [
+        StepResponse(
+            step_num=s.step_num,
+            observation=s.observation,
+            is_anomaly=s.is_anomaly,
+            action_type=s.action_type,
+            action_selector=s.action_selector,
+            action_reason=s.action_reason,
+            has_screenshot=bool(s.screenshot_b64),
+        )
+        for s in steps
+    ]
+
+
+@router.get("/{run_id}/steps/{step_num}/screenshot")
+def get_step_screenshot(
+    run_id: int, step_num: int, session: Session = Depends(get_session)
+) -> Response:
+    """Raw PNG bytes for a step's screenshot, for use directly as an <img src>."""
+    step = session.exec(
+        select(Step).where(Step.run_id == run_id, Step.step_num == step_num)
+    ).first()
+    if not step or not step.screenshot_b64:
+        raise HTTPException(
+            status_code=404, detail=f"No screenshot for run {run_id} step {step_num}"
+        )
+    return Response(content=base64.b64decode(step.screenshot_b64), media_type="image/png")
+
+
+@router.get("/{run_id}/findings/{finding_id}/screenshot")
+def get_finding_screenshot(
+    run_id: int, finding_id: int, session: Session = Depends(get_session)
+) -> Response:
+    """Raw PNG bytes for a finding's screenshot, for use directly as an <img src>."""
+    finding = session.get(Finding, finding_id)
+    if not finding or finding.run_id != run_id:
+        raise HTTPException(
+            status_code=404, detail=f"Finding {finding_id} not found on run {run_id}"
+        )
+    if not finding.screenshot_b64:
+        raise HTTPException(
+            status_code=404, detail=f"Finding {finding_id} has no screenshot"
+        )
+    return Response(content=base64.b64decode(finding.screenshot_b64), media_type="image/png")
 
 
 # ---------------------------------------------------------------------------
