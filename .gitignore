@@ -45,3 +45,6 @@ Thumbs.db
 # Playwright
 test-results/
 playwright-report/
+
+# Local session transcripts / command logs (never commit)
+*-local-command-caveat*.txt

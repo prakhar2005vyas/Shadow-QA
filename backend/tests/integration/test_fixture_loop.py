@@ -45,14 +45,26 @@ class _SilentHandler(http.server.SimpleHTTPRequestHandler):
 
 @pytest.fixture(scope="module")
 def fixture_server():
-    """Start a local HTTP server serving fixture-app/ on a random port."""
-    server = http.server.HTTPServer(("127.0.0.1", 0), _SilentHandler)
-    port = server.server_address[1]
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    url = f"http://127.0.0.1:{port}"
-    yield url
-    server.shutdown()
+    """
+    Yield a reachable base URL for the fixture app.
+
+    On a host checkout, fixture-app/ exists on disk and is served directly by a
+    throwaway http.server thread. Inside the backend Docker image only backend/'s
+    contents are copied in (build context is ./backend), so fixture-app/ does not
+    exist there at all — FIXTURE_DIR would resolve to a nonexistent /fixture-app
+    and 404 on every request. In that case the same fixture-app content is
+    already running as its own Compose service, reachable at settings.fixture_url.
+    """
+    if FIXTURE_DIR.is_dir():
+        server = http.server.HTTPServer(("127.0.0.1", 0), _SilentHandler)
+        port = server.server_address[1]
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        url = f"http://127.0.0.1:{port}"
+        yield url
+        server.shutdown()
+    else:
+        yield settings.fixture_url
 
 
 @pytest.fixture

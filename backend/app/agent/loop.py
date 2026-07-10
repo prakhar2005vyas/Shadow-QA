@@ -6,10 +6,16 @@ Runs the full perception-decision-action cycle:
   2. For each step (bounded by MAX_STEPS and MAX_SECONDS):
      a. Screenshot
      b. Summarise DOM
-     c. Call VLM → AgentStep
-     d. Record Finding if anomaly detected
-     e. Execute next_action
-     f. Break if type=="stop" or budgets exceeded
+     c. Compute a state ID (URL + structural DOM fingerprint) for loop prevention —
+        if this exact state was already fully explored, force a go_back and skip
+        the VLM call entirely; if it's a repeat but not exhausted, warn the model
+        in the prompt instead of letting it wander back into the same loop
+     d. Call VLM → AgentStep
+     e. Record Finding if anomaly detected
+     f. Fuzz the fill value some of the time (agent/fuzzing.py)
+     g. Record action in history, persist this step
+     h. Break if type=="stop" or budgets exceeded
+     i. Execute next_action
   3. Compile findings → Reports
   4. Update Run status in DB
 
@@ -19,8 +25,10 @@ surfaced as run.status="failed" or step "inconclusive".
 """
 
 import asyncio
+import hashlib
 import json
 import logging
+import re
 import time
 from datetime import datetime
 
@@ -29,6 +37,7 @@ from sqlmodel import Session
 from ..config import settings
 from ..models import Run, Finding, Step
 from .browser import BrowserSession
+from .fuzzing import get_fuzz_payload, should_fuzz
 from .vlm_client import call_vlm
 from .schemas import NextAction
 
@@ -53,8 +62,46 @@ GOAL = (
     "'Trusted by zero companies worldwide') is a deliberate content/design choice, not "
     "a bug. Do not report copywriting tone as an anomaly; only report things that are "
     "actually broken (errors, dead links, non-functional controls, real visual/layout "
-    "defects, genuine accessibility violations)."
+    "defects, genuine accessibility violations). "
+    "\n\nAct as a meticulous visual QA tester, not just a functional one. On every "
+    "screenshot, specifically look for: layout shifting, misaligned grids, and "
+    "overlapping text or buttons; stuck loading spinners or infinite progress bars "
+    "that never resolve; contrast and accessibility failures such as clipped/cut-off "
+    "elements or text whose color is unreadable against its background; and broken "
+    "image assets or missing UI components (blank space where a button, icon, or "
+    "widget should be). Use category 'visual_layout' for layout/overlap/spinner "
+    "issues, 'accessibility' for contrast/clipping issues, and 'other' for broken "
+    "assets/missing components that don't fit those two."
 )
+
+# ---------------------------------------------------------------------------
+# State memory graph (loop prevention)
+# ---------------------------------------------------------------------------
+# Lightweight, pure-stdlib (hashlib + re) fingerprinting — no extra Playwright
+# calls, no new dependencies. A "state" is (current URL, structural shape of
+# the interactive-elements list), deliberately ignoring the parts of the DOM
+# summary that change on their own between visits to the *same* state:
+# the numeric data-shadow-id values (stable per element, but not guaranteed to
+# renumber identically across a fresh page load) and the [ALREADY_TRIED]
+# markers (which change as tried_selectors grows, even though the underlying
+# page hasn't).
+_SHADOW_ID_RE = re.compile(r"\[data-shadow-id='\d+'\]")
+_ALREADY_TRIED_RE = re.compile(r"\s*\[ALREADY_TRIED\]")
+
+
+def _compute_state_id(url: str, dom_summary: str) -> str:
+    normalized = _SHADOW_ID_RE.sub("[data-shadow-id]", dom_summary)
+    normalized = _ALREADY_TRIED_RE.sub("", normalized)
+    fingerprint = f"{url}|{normalized}"
+    return hashlib.md5(fingerprint.encode()).hexdigest()[:12]
+
+
+def _is_state_exhausted(dom_summary: str) -> bool:
+    """True if every interactive element on this page has already been tried."""
+    if dom_summary.strip() in ("(no interactive elements found)", "(DOM summary unavailable)"):
+        return True
+    lines = [line for line in dom_summary.splitlines() if line.strip()]
+    return bool(lines) and all("[ALREADY_TRIED]" in line for line in lines)
 
 
 async def run_agent(run_id: int, target_url: str, db_session: Session) -> None:
@@ -81,6 +128,8 @@ async def run_agent(run_id: int, target_url: str, db_session: Session) -> None:
     network_watermark = 0
     step_count = 0
     start_time = time.monotonic()
+    # State memory graph for loop prevention: state_id -> number of visits.
+    state_visit_counts: dict[str, int] = {}
 
     try:
         async with BrowserSession() as browser:
@@ -112,7 +161,62 @@ async def run_agent(run_id: int, target_url: str, db_session: Session) -> None:
                 # b. DOM summary (elements already acted on are flagged [ALREADY_TRIED])
                 dom_summary = await browser.summarize_elements(tried_selectors)
 
-                # b2. console/network activity since the last action — many bugs (JS
+                # b2. state memory graph — has the agent been in this exact state
+                # (same URL + same structural set of interactive elements) before?
+                state_id = _compute_state_id(browser.current_url, dom_summary)
+                state_visit_counts[state_id] = state_visit_counts.get(state_id, 0) + 1
+                is_repeat_state = state_visit_counts[state_id] > 1
+
+                if is_repeat_state and _is_state_exhausted(dom_summary):
+                    # Every element at this state has already been tried and we've
+                    # looped back to it anyway — force a go_back instead of spending
+                    # a VLM call asking a question we already know the answer to.
+                    logger.info(
+                        "Run %d step %d — state %s exhausted (visit #%d), forcing go_back",
+                        run_id,
+                        step_index,
+                        state_id,
+                        state_visit_counts[state_id],
+                    )
+                    forced_action = NextAction(
+                        type="go_back",
+                        selector=None,
+                        value=None,
+                        reason="[LOOP PREVENTION] all elements at this state already tried",
+                    )
+                    action_history.append(
+                        f"step {step_index}: go_back — [LOOP PREVENTION] state {state_id} exhausted"
+                    )
+                    db_session.add(
+                        Step(
+                            run_id=run_id,
+                            step_num=step_index,
+                            observation=f"Loop prevention: state {state_id} fully exhausted, forcing go_back.",
+                            is_anomaly=False,
+                            action_type="go_back",
+                            action_selector=None,
+                            action_reason=forced_action.reason,
+                            screenshot_b64=screenshot_b64,
+                        )
+                    )
+                    db_session.commit()
+                    result = await browser.execute_action(forced_action)
+                    logger.info("Run %d step %d action result: %s", run_id, step_index, result)
+                    await asyncio.sleep(0.5)
+                    continue
+
+                # If we've seen this state before but it's not exhausted yet, tell the
+                # model explicitly rather than letting it wander back into a loop.
+                step_goal = GOAL
+                if is_repeat_state:
+                    step_goal = (
+                        f"{GOAL}\n\nIMPORTANT: you have been in this exact page state "
+                        f"before (visit #{state_visit_counts[state_id]}). Do not repeat an "
+                        f"action you've already tried here — choose an element WITHOUT the "
+                        f"[ALREADY_TRIED] marker."
+                    )
+
+                # b3. console/network activity since the last action — many bugs (JS
                 # errors, failed API calls) are invisible in a screenshot, so this is
                 # fed to the model as ground truth alongside the image.
                 all_console = browser.console_errors
@@ -127,7 +231,7 @@ async def run_agent(run_id: int, target_url: str, db_session: Session) -> None:
                     step_index=step_index,
                     screenshot_b64=screenshot_b64,
                     dom_summary=dom_summary,
-                    goal=GOAL,
+                    goal=step_goal,
                     action_history=action_history,
                     current_url=browser.current_url,
                     previously_reported_anomalies=reported_anomalies,
@@ -179,11 +283,36 @@ async def run_agent(run_id: int, target_url: str, db_session: Session) -> None:
                         f"[{agent_step.anomaly.category}] {agent_step.anomaly.description}"
                     )
 
-                # e. record action in history
+                # e. input fuzzing — some fraction of fill actions get the model's
+                # chosen value swapped for a random edge-case payload (long strings,
+                # SQL-injection characters, emoji, whitespace, invalid formats) to
+                # exercise the target's input validation and error handling. Kept
+                # probabilistic (not every fill) so the agent still explores what
+                # happens after a normal, valid form submission too.
                 action = agent_step.next_action
+                fuzz_note = ""
+                if action.type == "fill" and action.selector and should_fuzz():
+                    fuzz_category, fuzz_payload = get_fuzz_payload()
+                    original_value = action.value
+                    action = action.model_copy(update={"value": fuzz_payload})
+                    fuzz_note = f" [FUZZED:{fuzz_category}]"
+                    logger.info(
+                        "Run %d step %d — fuzzing fill on %s: category=%s (model wanted %r)",
+                        run_id,
+                        step_index,
+                        action.selector,
+                        fuzz_category,
+                        original_value,
+                    )
+
+                # f. record action in history — includes the actual value filled
+                # (post-fuzz, if fuzzed) so reproduction steps stay honest about
+                # what was really injected, not what the model merely intended.
                 action_history.append(
                     f"step {step_index}: {action.type}"
                     + (f" {action.selector}" if action.selector else "")
+                    + (f" = {action.value!r}" if action.type == "fill" else "")
+                    + fuzz_note
                     + f" — {action.reason}"
                 )
                 if action.selector:
@@ -206,7 +335,7 @@ async def run_agent(run_id: int, target_url: str, db_session: Session) -> None:
                 )
                 db_session.commit()
 
-                # f. stop if requested
+                # g. stop if requested
                 if action.type == "stop":
                     logger.info("Run %d received stop action at step %d", run_id, step_index)
                     break
