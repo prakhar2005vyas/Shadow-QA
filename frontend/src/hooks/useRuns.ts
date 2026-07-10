@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { Run } from '../types'
-
-const API = '/api'
+import { API_BASE as API } from '../apiBase'
 
 export function useRuns() {
   const [runs, setRuns] = useState<Run[]>([])

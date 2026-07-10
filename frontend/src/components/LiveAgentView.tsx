@@ -1,5 +1,6 @@
 import type { Run } from '../types'
 import { useSteps } from '../hooks/useSteps'
+import { API_BASE } from '../apiBase'
 
 interface LiveAgentViewProps {
   run: Run
@@ -17,8 +18,9 @@ export default function LiveAgentView({ run }: LiveAgentViewProps) {
   const steps = useSteps(run.id, active)
   const latestStep = steps[steps.length - 1]
 
-  const screenshotSrc =
-    latestStep?.has_screenshot ? `/api/runs/${run.id}/steps/${latestStep.step_num}/screenshot` : null
+  const screenshotSrc = latestStep?.has_screenshot
+    ? `${API_BASE}/runs/${run.id}/steps/${latestStep.step_num}/screenshot`
+    : null
 
   return (
     <div className="bg-surface border border-border rounded-xl p-6 mb-8">

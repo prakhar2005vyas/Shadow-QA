@@ -2,9 +2,9 @@
 Playwright browser session wrapper.
 
 Responsibilities:
-  - Launch headless Chromium, set viewport
+  - Launch headless Chromium (memory-lean flags, media requests blocked), set viewport
   - Attach listeners: console errors, page errors, failed network requests
-  - Take screenshots (returns base64 PNG)
+  - Take screenshots (returns base64 JPEG)
   - Summarise visible interactive elements (for the DOM summary sent to VLM)
   - Execute NextAction instances (click, fill, scroll, go_back)
   - Graceful error handling: Playwright errors are caught and logged, not re-raised
@@ -49,7 +49,33 @@ class BrowserSession:
         self._pw = await async_playwright().start()
         self._browser = await self._pw.chromium.launch(
             headless=True,
-            args=["--no-sandbox", "--disable-dev-shm-usage"],
+            # Memory-lean flags for resource-constrained containers (e.g. a 512MB
+            # hosting tier). None of these change what the page renders or what the
+            # agent can observe — they only strip out background Chromium machinery
+            # (GPU compositing, extensions, telemetry, sync, translate, etc.) that
+            # a headless single-tab automation session never uses anyway.
+            args=[
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-gpu",
+                "--disable-extensions",
+                "--disable-background-networking",
+                "--disable-background-timer-throttling",
+                "--disable-backgrounding-occluded-windows",
+                "--disable-renderer-backgrounding",
+                "--disable-breakpad",
+                "--disable-component-extensions-with-background-pages",
+                "--disable-features=TranslateUI,BlinkGenPropertyTrees",
+                "--disable-ipc-flooding-protection",
+                "--disable-sync",
+                "--disable-translate",
+                "--metrics-recording-only",
+                "--mute-audio",
+                "--no-first-run",
+                "--safebrowsing-disable-auto-update",
+                "--password-store=basic",
+                "--use-mock-keychain",
+            ],
         )
         self._context = await self._browser.new_context(viewport=self._viewport)
         self._page = await self._context.new_page()
@@ -59,7 +85,18 @@ class BrowserSession:
         self._page.on("pageerror", self._on_page_error)
         self._page.on("requestfailed", self._on_request_failed)
 
+        # Block video/audio requests only — these are pure memory/bandwidth cost
+        # with zero QA signal. Images are deliberately NEVER blocked here: broken
+        # images are one of the bug categories this agent specifically looks for.
+        await self._page.route("**/*", self._handle_route)
+
         return self
+
+    async def _handle_route(self, route) -> None:
+        if route.request.resource_type == "media":
+            await route.abort()
+        else:
+            await route.continue_()
 
     async def __aexit__(self, *args):
         try:
@@ -110,17 +147,24 @@ class BrowserSession:
     # ------------------------------------------------------------------
 
     async def navigate(self, url: str, timeout: float = 15_000) -> None:
-        """Navigate to a URL. Logs and continues on timeout/error."""
+        """
+        Navigate to a URL. Logs and continues on timeout/error.
+
+        Waits for "load" (all images/stylesheets/iframes fetched) rather than
+        "networkidle" — many real sites (ad/analytics-heavy ones especially) never
+        actually go network-idle, so networkidle just burns the full timeout on
+        every navigation without adding anything the agent can see.
+        """
         try:
-            await self._page.goto(url, wait_until="networkidle", timeout=timeout)
+            await self._page.goto(url, wait_until="load", timeout=timeout)
             logger.info("Navigated to %s", self._page.url)
         except PlaywrightError as exc:
             logger.warning("Navigation to %s failed/timed-out: %s", url, exc)
 
     async def screenshot_b64(self) -> str:
-        """Take a viewport screenshot and return as base64-encoded PNG string."""
-        png_bytes = await self._page.screenshot(full_page=False, type="png")
-        return base64.b64encode(png_bytes).decode()
+        """Take a viewport screenshot and return as a base64-encoded JPEG string."""
+        jpeg_bytes = await self._page.screenshot(full_page=False, type="jpeg", quality=70)
+        return base64.b64encode(jpeg_bytes).decode()
 
     async def summarize_elements(self, tried_selectors: Optional[set[str]] = None) -> str:
         """
@@ -228,7 +272,7 @@ class BrowserSession:
             elif action.type == "go_back":
                 await self._page.go_back(timeout=10_000)
                 try:
-                    await self._page.wait_for_load_state("networkidle", timeout=8_000)
+                    await self._page.wait_for_load_state("load", timeout=8_000)
                 except PlaywrightError:
                     pass
                 return f"Navigated back to {self._page.url}"

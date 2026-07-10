@@ -5,8 +5,8 @@ POST /runs                                          — create a new run (kicks 
 GET  /runs                                           — list all runs
 GET  /runs/{id}                                      — get run details with findings and reports
 GET  /runs/{id}/steps                                — step-by-step feed for the live agent view
-GET  /runs/{id}/steps/{step_num}/screenshot          — raw PNG bytes for a step's screenshot
-GET  /runs/{id}/findings/{finding_id}/screenshot     — raw PNG bytes for a finding's screenshot
+GET  /runs/{id}/steps/{step_num}/screenshot          — raw JPEG bytes for a step's screenshot
+GET  /runs/{id}/findings/{finding_id}/screenshot     — raw JPEG bytes for a finding's screenshot
 """
 
 import base64
@@ -149,7 +149,7 @@ def get_run_steps(run_id: int, session: Session = Depends(get_session)) -> list[
 def get_step_screenshot(
     run_id: int, step_num: int, session: Session = Depends(get_session)
 ) -> Response:
-    """Raw PNG bytes for a step's screenshot, for use directly as an <img src>."""
+    """Raw JPEG bytes for a step's screenshot, for use directly as an <img src>."""
     step = session.exec(
         select(Step).where(Step.run_id == run_id, Step.step_num == step_num)
     ).first()
@@ -157,14 +157,14 @@ def get_step_screenshot(
         raise HTTPException(
             status_code=404, detail=f"No screenshot for run {run_id} step {step_num}"
         )
-    return Response(content=base64.b64decode(step.screenshot_b64), media_type="image/png")
+    return Response(content=base64.b64decode(step.screenshot_b64), media_type="image/jpeg")
 
 
 @router.get("/{run_id}/findings/{finding_id}/screenshot")
 def get_finding_screenshot(
     run_id: int, finding_id: int, session: Session = Depends(get_session)
 ) -> Response:
-    """Raw PNG bytes for a finding's screenshot, for use directly as an <img src>."""
+    """Raw JPEG bytes for a finding's screenshot, for use directly as an <img src>."""
     finding = session.get(Finding, finding_id)
     if not finding or finding.run_id != run_id:
         raise HTTPException(
@@ -174,7 +174,7 @@ def get_finding_screenshot(
         raise HTTPException(
             status_code=404, detail=f"Finding {finding_id} has no screenshot"
         )
-    return Response(content=base64.b64decode(finding.screenshot_b64), media_type="image/png")
+    return Response(content=base64.b64decode(finding.screenshot_b64), media_type="image/jpeg")
 
 
 # ---------------------------------------------------------------------------

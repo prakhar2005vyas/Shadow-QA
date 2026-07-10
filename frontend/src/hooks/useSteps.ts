@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { AgentStepEvent } from '../types'
-
-const API = '/api'
+import { API_BASE as API } from '../apiBase'
 
 /**
  * Polls GET /runs/{runId}/steps for the live agent view. Polls on an interval

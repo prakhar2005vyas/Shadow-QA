@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { Finding, Run } from '../types'
 import SeverityBadge from './SeverityBadge'
+import { API_BASE } from '../apiBase'
 
 const STATUS_CLASSES: Record<string, string> = {
   pending: 'bg-[#1a2d4d] text-info',
@@ -22,7 +23,7 @@ function FindingCard({ runId, finding }: { runId: number; finding: Finding }) {
 
       {finding.has_screenshot && (
         <img
-          src={`/api/runs/${runId}/findings/${finding.id}/screenshot`}
+          src={`${API_BASE}/runs/${runId}/findings/${finding.id}/screenshot`}
           alt={`Screenshot for finding ${finding.id}`}
           className="rounded-md border border-border-muted mb-2 max-h-56 w-full object-contain bg-surface"
         />

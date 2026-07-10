@@ -129,7 +129,7 @@ def test_step_screenshot_returns_png_bytes(seeded_client):
     client, run_id, _ = seeded_client
     resp = client.get(f"/runs/{run_id}/steps/1/screenshot")
     assert resp.status_code == 200
-    assert resp.headers["content-type"] == "image/png"
+    assert resp.headers["content-type"] == "image/jpeg"
     assert resp.content == base64.b64decode(_FAKE_PNG_B64)
 
 
@@ -154,7 +154,7 @@ def test_finding_screenshot_returns_png_bytes(seeded_client):
     client, run_id, finding_id = seeded_client
     resp = client.get(f"/runs/{run_id}/findings/{finding_id}/screenshot")
     assert resp.status_code == 200
-    assert resp.headers["content-type"] == "image/png"
+    assert resp.headers["content-type"] == "image/jpeg"
     assert resp.content == base64.b64decode(_FAKE_PNG_B64)
 
 
