@@ -169,8 +169,31 @@ async def run_agent(run_id: int, target_url: str, db_session: Session) -> None:
                     browser.current_url,
                 )
 
-                # a. screenshot
+                # a. screenshot — never raises; returns None if the page hung
+                # Playwright's screenshot call twice in a row (see browser.py).
                 screenshot_b64 = await browser.screenshot_b64()
+                if screenshot_b64 is None:
+                    logger.warning(
+                        "Run %d step %d — screenshot unavailable after retry, skipping VLM call for this step",
+                        run_id,
+                        step_index,
+                    )
+                    action_history.append(f"step {step_index}: [inconclusive — screenshot timeout]")
+                    db_session.add(
+                        Step(
+                            run_id=run_id,
+                            step_num=step_index,
+                            observation="Screenshot capture timed out twice — this step is inconclusive.",
+                            is_anomaly=False,
+                            action_type="skipped",
+                            action_selector=None,
+                            action_reason="screenshot timeout",
+                            screenshot_b64=None,
+                        )
+                    )
+                    db_session.commit()
+                    await asyncio.sleep(0.5)
+                    continue
 
                 # b. DOM summary (elements already acted on are flagged [ALREADY_TRIED])
                 dom_summary = await browser.summarize_elements(tried_selectors)

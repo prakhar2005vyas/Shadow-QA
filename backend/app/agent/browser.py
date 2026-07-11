@@ -85,15 +85,18 @@ class BrowserSession:
         self._page.on("pageerror", self._on_page_error)
         self._page.on("requestfailed", self._on_request_failed)
 
-        # Block video/audio requests only — these are pure memory/bandwidth cost
-        # with zero QA signal. Images are deliberately NEVER blocked here: broken
-        # images are one of the bug categories this agent specifically looks for.
+        # Block video/audio and web font requests — pure memory/bandwidth/latency
+        # cost with zero QA signal. Fonts in particular can hang a page load (a
+        # slow/unreachable font CDN makes Page.screenshot()'s implicit "wait for
+        # fonts to load" step stall for the full timeout). Images are deliberately
+        # NEVER blocked here: broken images are one of the bug categories this
+        # agent specifically looks for.
         await self._page.route("**/*", self._handle_route)
 
         return self
 
     async def _handle_route(self, route) -> None:
-        if route.request.resource_type == "media":
+        if route.request.resource_type in ("media", "font"):
             await route.abort()
         else:
             await route.continue_()
@@ -161,10 +164,51 @@ class BrowserSession:
         except PlaywrightError as exc:
             logger.warning("Navigation to %s failed/timed-out: %s", url, exc)
 
-    async def screenshot_b64(self) -> str:
-        """Take a viewport screenshot and return as a base64-encoded JPEG string."""
-        jpeg_bytes = await self._page.screenshot(full_page=False, type="jpeg", quality=70)
-        return base64.b64encode(jpeg_bytes).decode()
+    async def screenshot_b64(
+        self, timeout: float = 30_000, fallback_timeout: float = 5_000
+    ) -> Optional[str]:
+        """
+        Take a viewport screenshot and return as a base64-encoded JPEG string.
+
+        Never raises — a page that hangs Playwright's screenshot call (e.g. one
+        still waiting on webfonts, or mid-animation) would otherwise crash the
+        whole run with "Timeout 30000ms exceeded ... waiting for fonts to load".
+        animations="disabled" skips Playwright's finish-animations-first wait, and
+        a single short-timeout retry gives one more chance before giving up. If
+        both attempts fail, logs and returns None — the loop skips this step's
+        VLM call and moves on rather than crashing.
+        """
+        try:
+            jpeg_bytes = await self._page.screenshot(
+                full_page=False,
+                type="jpeg",
+                quality=70,
+                timeout=timeout,
+                animations="disabled",
+            )
+            return base64.b64encode(jpeg_bytes).decode()
+        except PlaywrightError as exc:
+            logger.warning(
+                "screenshot_b64 timed out/failed (timeout=%.0fms): %s — retrying with a %.0fms fallback",
+                timeout,
+                exc,
+                fallback_timeout,
+            )
+            try:
+                jpeg_bytes = await self._page.screenshot(
+                    full_page=False,
+                    type="jpeg",
+                    quality=70,
+                    timeout=fallback_timeout,
+                    animations="disabled",
+                )
+                return base64.b64encode(jpeg_bytes).decode()
+            except PlaywrightError as exc2:
+                logger.error(
+                    "screenshot_b64 fallback also failed — continuing without a screenshot: %s",
+                    exc2,
+                )
+                return None
 
     async def summarize_elements(self, tried_selectors: Optional[set[str]] = None) -> str:
         """
