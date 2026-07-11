@@ -130,6 +130,7 @@ async def run_agent(run_id: int, target_url: str, db_session: Session) -> None:
     start_time = time.monotonic()
     # State memory graph for loop prevention: state_id -> number of visits.
     state_visit_counts: dict[str, int] = {}
+    cancelled = False
 
     try:
         async with BrowserSession() as browser:
@@ -145,6 +146,19 @@ async def run_agent(run_id: int, target_url: str, db_session: Session) -> None:
                         elapsed,
                         settings.max_seconds_per_run,
                     )
+                    break
+
+                # ---- cancellation check ----
+                # POST /runs/{id}/cancel runs in a *different* DB session/request,
+                # so db_session.refresh() forces a real SELECT here rather than
+                # relying on this long-lived session's identity map (which could
+                # otherwise keep serving the stale in-memory `run` object).
+                db_session.refresh(run)
+                if run.status == "cancelled":
+                    logger.info(
+                        "Run %d cancelled by user request at step %d", run_id, step_index
+                    )
+                    cancelled = True
                     break
 
                 step_count += 1
@@ -359,13 +373,21 @@ async def run_agent(run_id: int, target_url: str, db_session: Session) -> None:
         # ------------------------------------------------------------------ #
         run_final = db_session.get(Run, run_id)
         if run_final:
-            run_final.status = "completed"
+            # Don't stomp the 'cancelled' status the /cancel endpoint already set —
+            # only mark 'completed' if the loop ended on its own terms.
+            if not cancelled:
+                run_final.status = "completed"
             run_final.completed_at = datetime.utcnow()
             run_final.total_steps = step_count
             db_session.add(run_final)
             db_session.commit()
 
-        logger.info("Run %d completed — %d steps, findings stored", run_id, step_count)
+        logger.info(
+            "Run %d %s — %d steps, findings stored",
+            run_id,
+            "cancelled" if cancelled else "completed",
+            step_count,
+        )
 
     except Exception as exc:  # noqa: BLE001
         logger.exception("Run %d failed with unhandled exception: %s", run_id, exc)

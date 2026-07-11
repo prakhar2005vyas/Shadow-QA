@@ -8,6 +8,7 @@ const STATUS_CLASSES: Record<string, string> = {
   running: 'bg-[#1a2d4d] text-info',
   completed: 'bg-[#1a4731] text-success',
   failed: 'bg-[#4d1a1a] text-danger',
+  cancelled: 'bg-[#3d3d1a] text-warning',
 }
 
 function FindingCard({ runId, finding }: { runId: number; finding: Finding }) {

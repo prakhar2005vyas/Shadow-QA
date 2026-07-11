@@ -1,4 +1,4 @@
-export type RunStatus = 'pending' | 'running' | 'completed' | 'failed'
+export type RunStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
 
 export type Severity = 'low' | 'medium' | 'high' | 'critical'
 

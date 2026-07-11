@@ -7,6 +7,8 @@ GET  /runs/{id}                                      — get run details with fi
 GET  /runs/{id}/steps                                — step-by-step feed for the live agent view
 GET  /runs/{id}/steps/{step_num}/screenshot          — raw JPEG bytes for a step's screenshot
 GET  /runs/{id}/findings/{finding_id}/screenshot     — raw JPEG bytes for a finding's screenshot
+POST /runs/{id}/cancel                               — request cancellation of an in-progress run
+DELETE /runs                                         — delete all runs (and their findings/steps/reports)
 """
 
 import base64
@@ -108,12 +110,49 @@ def list_runs(session: Session = Depends(get_session)) -> list[RunResponse]:
     return [_run_to_response(r, _get_findings(r.id, session), session) for r in runs]
 
 
+@router.delete("")
+def clear_history(session: Session = Depends(get_session)) -> dict:
+    """
+    Delete all runs, and (via ORM cascade — see Run.findings/steps and
+    Finding.report in models.py) their findings, steps, and reports with them.
+    Deletes row-by-row via session.delete() rather than a bulk statement, since
+    the cascade is ORM-level and a bulk DELETE would bypass it and hit FK errors.
+    """
+    runs = session.exec(select(Run)).all()
+    count = len(runs)
+    for run in runs:
+        session.delete(run)
+    session.commit()
+    logger.info("Cleared history — deleted %d run(s)", count)
+    return {"deleted": count}
+
+
 @router.get("/{run_id}", response_model=RunResponse)
 def get_run(run_id: int, session: Session = Depends(get_session)) -> RunResponse:
     """Get a specific run with full finding and report details."""
     run = session.get(Run, run_id)
     if not run:
         raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+    return _run_to_response(run, _get_findings(run_id, session), session)
+
+
+@router.post("/{run_id}/cancel", response_model=RunResponse)
+def cancel_run(run_id: int, session: Session = Depends(get_session)) -> RunResponse:
+    """
+    Request cancellation of an in-progress run. The agent loop (agent/loop.py)
+    polls the run's status at the top of each step and stops as soon as it sees
+    'cancelled', rather than being killed mid-action. A run already in a
+    terminal state (completed/failed/cancelled) is left untouched.
+    """
+    run = session.get(Run, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+    if run.status in ("pending", "running"):
+        run.status = "cancelled"
+        session.add(run)
+        session.commit()
+        session.refresh(run)
+        logger.info("Run %d cancellation requested", run_id)
     return _run_to_response(run, _get_findings(run_id, session), session)
 
 

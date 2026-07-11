@@ -14,14 +14,21 @@ class Run(SQLModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     target_url: str
-    status: str = Field(default="pending")  # pending | running | completed | failed
+    status: str = Field(default="pending")  # pending | running | completed | failed | cancelled
     created_at: datetime = Field(default_factory=datetime.utcnow)
     completed_at: Optional[datetime] = None
     error_msg: Optional[str] = None
     total_steps: int = Field(default=0)
 
-    findings: List["Finding"] = Relationship(back_populates="run")
-    steps: List["Step"] = Relationship(back_populates="run")
+    # cascade="all, delete-orphan" — deleting a Run (Clear History) removes its
+    # findings/steps too. This is an ORM-level cascade: it only fires via
+    # session.delete(run), not a bulk DELETE statement.
+    findings: List["Finding"] = Relationship(
+        back_populates="run", sa_relationship_kwargs={"cascade": "all, delete-orphan"}
+    )
+    steps: List["Step"] = Relationship(
+        back_populates="run", sa_relationship_kwargs={"cascade": "all, delete-orphan"}
+    )
 
 
 class Step(SQLModel, table=True):
@@ -67,7 +74,9 @@ class Finding(SQLModel, table=True):
     action_trail_json: str = Field(default="[]")
 
     run: Optional[Run] = Relationship(back_populates="findings")
-    report: Optional["Report"] = Relationship(back_populates="finding")
+    report: Optional["Report"] = Relationship(
+        back_populates="finding", sa_relationship_kwargs={"cascade": "all, delete-orphan"}
+    )
 
     # --- convenience properties ---
     @property

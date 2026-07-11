@@ -42,7 +42,7 @@ export function useRuns() {
         if (r.ok) {
           const updated: Run = await r.json()
           setRuns(prev => prev.map(x => (x.id === updated.id ? updated : x)))
-          if (updated.status === 'completed' || updated.status === 'failed') {
+          if (['completed', 'failed', 'cancelled'].includes(updated.status)) {
             clearInterval(intervalId)
           }
         }
@@ -54,5 +54,26 @@ export function useRuns() {
     }
   }, [])
 
-  return { runs, loading, error, startRun }
+  const cancelRun = useCallback(async (runId: number) => {
+    try {
+      const res = await fetch(`${API}/runs/${runId}/cancel`, { method: 'POST' })
+      if (res.ok) {
+        const updated: Run = await res.json()
+        setRuns(prev => prev.map(x => (x.id === updated.id ? updated : x)))
+      }
+    } catch {
+      // silent — the next poll (or a manual refresh) will reflect the true state
+    }
+  }, [])
+
+  const clearHistory = useCallback(async () => {
+    try {
+      const res = await fetch(`${API}/runs`, { method: 'DELETE' })
+      if (res.ok) setRuns([])
+    } catch {
+      // silent — transient network hiccup; runs list is left as-is
+    }
+  }, [])
+
+  return { runs, loading, error, startRun, cancelRun, clearHistory }
 }

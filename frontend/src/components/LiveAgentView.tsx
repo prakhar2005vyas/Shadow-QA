@@ -4,6 +4,7 @@ import { API_BASE } from '../apiBase'
 
 interface LiveAgentViewProps {
   run: Run
+  onCancel: (runId: number) => void
 }
 
 const STATUS_CLASSES: Record<string, string> = {
@@ -11,9 +12,10 @@ const STATUS_CLASSES: Record<string, string> = {
   running: 'bg-[#1a2d4d] text-info',
   completed: 'bg-[#1a4731] text-success',
   failed: 'bg-[#4d1a1a] text-danger',
+  cancelled: 'bg-[#3d3d1a] text-warning',
 }
 
-export default function LiveAgentView({ run }: LiveAgentViewProps) {
+export default function LiveAgentView({ run, onCancel }: LiveAgentViewProps) {
   const active = run.status === 'pending' || run.status === 'running'
   const steps = useSteps(run.id, active)
   const latestStep = steps[steps.length - 1]
@@ -26,9 +28,19 @@ export default function LiveAgentView({ run }: LiveAgentViewProps) {
     <div className="bg-surface border border-border rounded-xl p-6 mb-8">
       <div className="flex items-center justify-between flex-wrap gap-2 mb-4">
         <h2 className="text-lg font-semibold">Live Agent View — Run #{run.id}</h2>
-        <span className={`${STATUS_CLASSES[run.status]} px-2 py-0.5 rounded text-xs font-bold uppercase`}>
-          {run.status}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className={`${STATUS_CLASSES[run.status]} px-2 py-0.5 rounded text-xs font-bold uppercase`}>
+            {run.status}
+          </span>
+          {active && (
+            <button
+              onClick={() => onCancel(run.id)}
+              className="px-3 py-1 rounded-md text-xs font-bold text-white bg-danger hover:opacity-90 transition-opacity"
+            >
+              ■ Stop Operation
+            </button>
+          )}
+        </div>
       </div>
       <p className="text-muted text-sm break-all mb-4">{run.target_url}</p>
 
