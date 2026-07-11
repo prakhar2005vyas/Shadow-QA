@@ -11,3 +11,7 @@ pytest>=8.2.0
 pytest-asyncio>=0.23.7
 anyio[trio]>=4.4.0
 aiosqlite>=0.20.0
+# PostgreSQL driver (Neon in production). [binary] bundles libpq, so no
+# system apt packages are needed in the Docker image. Sync driver — matches
+# the app's synchronous SQLModel/Session architecture (not asyncpg).
+psycopg[binary]>=3.1.0
