@@ -134,9 +134,55 @@ async def run_agent(run_id: int, target_url: str, db_session: Session) -> None:
 
     try:
         async with BrowserSession() as browser:
-            await browser.navigate(target_url)
+            navigated = await browser.navigate(target_url)
 
-            for step_index in range(settings.max_steps_per_run):
+            if not navigated:
+                # Target is completely unreachable (connection refused, DNS failure,
+                # hard timeout) — there's no page to explore, so record one critical
+                # finding and fall through to the normal compile/complete path below
+                # instead of running the step loop against a browser error page.
+                logger.error(
+                    "Run %d — target URL %r is unreachable; recording a critical "
+                    "finding and concluding the run",
+                    run_id,
+                    target_url,
+                )
+                step_count = 1
+                unreachable_msg = (
+                    f"Target URL '{target_url}' could not be reached at all — the "
+                    "browser's initial navigation failed (connection refused, DNS "
+                    "failure, or a hard navigation timeout). No page ever loaded, so "
+                    "no exploration was possible."
+                )
+                db_session.add(
+                    Step(
+                        run_id=run_id,
+                        step_num=0,
+                        observation=unreachable_msg,
+                        is_anomaly=True,
+                        action_type="stop",
+                        action_selector=None,
+                        action_reason="target URL unreachable",
+                        screenshot_b64=None,
+                    )
+                )
+                finding = Finding(
+                    run_id=run_id,
+                    step_num=0,
+                    description=unreachable_msg,
+                    severity="critical",
+                    category="error_state",
+                    screenshot_b64=None,
+                )
+                db_session.add(finding)
+                db_session.commit()
+                logger.info(
+                    "Run %d — finding #%d recorded: [critical] target unreachable",
+                    run_id,
+                    finding.id,
+                )
+
+            for step_index in range(settings.max_steps_per_run if navigated else 0):
                 # ---- wall-clock budget ----
                 elapsed = time.monotonic() - start_time
                 if elapsed > settings.max_seconds_per_run:

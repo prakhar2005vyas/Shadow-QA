@@ -149,20 +149,60 @@ class BrowserSession:
     # Core actions
     # ------------------------------------------------------------------
 
-    async def navigate(self, url: str, timeout: float = 15_000) -> None:
+    async def navigate(self, url: str, timeout: float = 15_000) -> bool:
         """
-        Navigate to a URL. Logs and continues on timeout/error.
+        Navigate to a URL. Never raises.
 
         Waits for "load" (all images/stylesheets/iframes fetched) rather than
         "networkidle" — many real sites (ad/analytics-heavy ones especially) never
         actually go network-idle, so networkidle just burns the full timeout on
         every navigation without adding anything the agent can see.
+
+        Returns:
+            True if the page loaded. False if the target was completely
+            unreachable — connection refused, DNS failure (ERR_NAME_NOT_RESOLVED),
+            or a hard navigation timeout — so the caller can stop and report that
+            rather than exploring a Chrome network-error interstitial as if it
+            were the real page.
         """
         try:
             await self._page.goto(url, wait_until="load", timeout=timeout)
             logger.info("Navigated to %s", self._page.url)
+            return True
         except PlaywrightError as exc:
             logger.warning("Navigation to %s failed/timed-out: %s", url, exc)
+            return False
+        except Exception as exc:  # noqa: BLE001 — a hard connection failure can surface as a bare Exception
+            logger.warning("Navigation to %s failed with an unexpected error: %s", url, exc)
+            return False
+
+    async def _capture_screenshot_bytes(self, timeout: float) -> Optional[bytes]:
+        """
+        Attempt a single screenshot capture. Never raises: catches both
+        playwright.async_api.Error (timeouts, "Protocol error ... Unable to
+        capture screenshot" from a crashed/OOM'd browser process) and any other
+        Exception that leaks through from the underlying transport when the
+        browser process itself has died — logging a warning and returning None
+        either way rather than letting either propagate.
+        """
+        try:
+            return await self._page.screenshot(
+                full_page=False,
+                type="jpeg",
+                quality=70,
+                timeout=timeout,
+                animations="disabled",
+            )
+        except PlaywrightError as exc:
+            logger.warning("Screenshot capture failed (timeout=%.0fms): %s", timeout, exc)
+            return None
+        except Exception as exc:  # noqa: BLE001 — a browser crash/OOM can surface as a bare Exception
+            logger.warning(
+                "Screenshot capture failed with an unexpected (non-Playwright) error (timeout=%.0fms): %s",
+                timeout,
+                exc,
+            )
+            return None
 
     async def screenshot_b64(
         self, timeout: float = 30_000, fallback_timeout: float = 5_000
@@ -172,43 +212,21 @@ class BrowserSession:
 
         Never raises — a page that hangs Playwright's screenshot call (e.g. one
         still waiting on webfonts, or mid-animation) would otherwise crash the
-        whole run with "Timeout 30000ms exceeded ... waiting for fonts to load".
-        animations="disabled" skips Playwright's finish-animations-first wait, and
-        a single short-timeout retry gives one more chance before giving up. If
-        both attempts fail, logs and returns None — the loop skips this step's
-        VLM call and moves on rather than crashing.
+        whole run with "Timeout 30000ms exceeded ...", and a crashed/OOM'd
+        browser process can throw "Protocol error (Page.captureScreenshot):
+        Unable to capture screenshot". animations="disabled" skips Playwright's
+        finish-animations-first wait, and a single short-timeout retry gives one
+        more chance before giving up. If both attempts fail, returns None — the
+        loop skips this step's VLM call and moves on rather than crashing.
         """
-        try:
-            jpeg_bytes = await self._page.screenshot(
-                full_page=False,
-                type="jpeg",
-                quality=70,
-                timeout=timeout,
-                animations="disabled",
-            )
-            return base64.b64encode(jpeg_bytes).decode()
-        except PlaywrightError as exc:
-            logger.warning(
-                "screenshot_b64 timed out/failed (timeout=%.0fms): %s — retrying with a %.0fms fallback",
-                timeout,
-                exc,
-                fallback_timeout,
-            )
-            try:
-                jpeg_bytes = await self._page.screenshot(
-                    full_page=False,
-                    type="jpeg",
-                    quality=70,
-                    timeout=fallback_timeout,
-                    animations="disabled",
-                )
-                return base64.b64encode(jpeg_bytes).decode()
-            except PlaywrightError as exc2:
-                logger.error(
-                    "screenshot_b64 fallback also failed — continuing without a screenshot: %s",
-                    exc2,
-                )
-                return None
+        jpeg_bytes = await self._capture_screenshot_bytes(timeout)
+        if jpeg_bytes is None:
+            logger.info("Retrying screenshot with a %.0fms fallback timeout", fallback_timeout)
+            jpeg_bytes = await self._capture_screenshot_bytes(fallback_timeout)
+        if jpeg_bytes is None:
+            logger.error("screenshot_b64 failed twice — continuing without a screenshot for this step")
+            return None
+        return base64.b64encode(jpeg_bytes).decode()
 
     async def summarize_elements(self, tried_selectors: Optional[set[str]] = None) -> str:
         """
