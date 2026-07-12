@@ -7,7 +7,7 @@ interface RunFormProps {
 }
 
 export default function RunForm({ onSubmit, loading, error }: RunFormProps) {
-  const [url, setUrl] = useState('http://fixture-app:80')
+  const [url, setUrl] = useState('')
 
   return (
     <div className="bg-surface border border-border rounded-xl p-6 mb-8">
