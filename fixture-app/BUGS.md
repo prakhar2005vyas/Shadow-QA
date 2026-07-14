@@ -1,7 +1,7 @@
 # Fixture App — Seeded Bugs Answer Key
 
-This directory contains a simple static web application with **9 intentionally seeded bugs**.
-It is used as the target for Shadow QA integration tests and demos.
+This directory contains a simple static web application with **9 intentionally seeded bugs**
+(`B01`–`B09`). It is used as the target for Shadow QA integration tests and demos.
 
 ## Bug Inventory
 
@@ -19,8 +19,15 @@ It is used as the target for Shadow QA integration tests and demos.
 
 ## Verification
 
-A Shadow QA run in mock mode should detect all 8 bugs.
-The integration test (`tests/integration/test_fixture_loop.py`) asserts ≥ 3 are found.
+This fixture seeds **9 bugs** (B01–B09). The deterministic mock VLM
+(`backend/app/agent/mock_vlm.py`) is scripted to surface **7 of them** in a
+single run — B01, B03, B04, B05, B06, B07, B08 — spanning four categories
+(`broken_interaction`, `visual_layout`, `accessibility`, `dead_link`, `other`).
+B02 (contact-form 404) and B09 (disabled export button) are intentionally left
+for the **real** VLM to find, so mock and real runs aren't identical.
+
+The Phase 0 integration test (`tests/integration/test_fixture_loop.py`) asserts
+≥ 3 findings across ≥ 2 categories are produced end-to-end in mock mode.
 
 ## What is intentionally correct
 

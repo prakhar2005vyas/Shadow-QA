@@ -14,7 +14,10 @@ from .schemas import AgentStep, NextAction, Anomaly
 
 # ---------------------------------------------------------------------------
 # Scripted sequence — one entry per step_index.
-# Designed to exercise all 8 seeded bugs in fixture-app/BUGS.md.
+# Surfaces 7 of the 9 seeded bugs in fixture-app/BUGS.md — B01, B03, B04, B05,
+# B06, B07, B08 — across four categories. B02 (contact-form 404) and B09
+# (disabled export button) are deliberately left for the real VLM to find, so
+# mock and real runs differ.
 # ---------------------------------------------------------------------------
 _SCRIPT: list[dict] = [
     # step 0 — land on page, immediately flag layout overflow (bug #3)
