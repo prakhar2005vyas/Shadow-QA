@@ -49,15 +49,20 @@ class BrowserSession:
         self._pw = await async_playwright().start()
         self._browser = await self._pw.chromium.launch(
             headless=True,
-            # Memory-lean flags for resource-constrained containers (e.g. a 512MB
-            # hosting tier). None of these change what the page renders or what the
-            # agent can observe — they only strip out background Chromium machinery
-            # (GPU compositing, extensions, telemetry, sync, translate, etc.) that
-            # a headless single-tab automation session never uses anyway.
+            # Memory-lean flags — tuned for a PERMANENT 512MB Render deployment
+            # (no bigger compute is coming). None of these change what the page
+            # renders or what the agent can observe; they strip out background
+            # Chromium machinery and, critically, cap the process/heap growth that
+            # is the actual OOM risk on a small container.
             args=[
+                # --- sandbox / shared-memory (required on most containers) ---
                 "--no-sandbox",
-                "--disable-dev-shm-usage",
+                "--disable-dev-shm-usage",       # use /tmp not the tiny /dev/shm
+                # --- GPU / rasterization (headless never needs these) ---
                 "--disable-gpu",
+                "--disable-software-rasterizer",
+                "--disable-accelerated-2d-canvas",
+                # --- background machinery / telemetry ---
                 "--disable-extensions",
                 "--disable-background-networking",
                 "--disable-background-timer-throttling",
@@ -65,8 +70,9 @@ class BrowserSession:
                 "--disable-renderer-backgrounding",
                 "--disable-breakpad",
                 "--disable-component-extensions-with-background-pages",
-                "--disable-features=TranslateUI,BlinkGenPropertyTrees",
                 "--disable-ipc-flooding-protection",
+                "--disable-hang-monitor",
+                "--disable-domain-reliability",
                 "--disable-sync",
                 "--disable-translate",
                 "--metrics-recording-only",
@@ -75,8 +81,22 @@ class BrowserSession:
                 "--safebrowsing-disable-auto-update",
                 "--password-store=basic",
                 "--use-mock-keychain",
+                # --- the big 512MB levers ---
+                # Disable site isolation so cross-origin frames/subframes don't each
+                # spawn their own renderer process — a headless single-purpose QA
+                # crawler doesn't need the security boundary, and it's a major RAM
+                # saver on ad/iframe-heavy pages.
+                "--disable-features=TranslateUI,BlinkGenPropertyTrees,IsolateOrigins,site-per-process",
+                # Hard-cap the number of renderer processes to one.
+                "--renderer-process-limit=1",
+                # Cap the page's V8 old-space heap so a runaway/leaky SPA triggers a
+                # (caught) renderer crash instead of an OOM kill of the whole
+                # container. ~128MB leaves headroom for FastAPI + the browser
+                # process within 512MB.
+                "--js-flags=--max-old-space-size=128",
             ],
         )
+        # Single-tab context: one context, one page, reused for the whole run.
         self._context = await self._browser.new_context(viewport=self._viewport)
         self._page = await self._context.new_page()
 
@@ -84,6 +104,13 @@ class BrowserSession:
         self._page.on("console", self._on_console)
         self._page.on("pageerror", self._on_page_error)
         self._page.on("requestfailed", self._on_request_failed)
+
+        # Enforce single-tab discipline: if the target opens a popup or new tab
+        # (target=_blank, window.open), close it immediately. The agent only ever
+        # drives self._page; orphaned tabs it never touches would otherwise pile up
+        # and leak memory over a long/looping run — a real OOM vector on 512MB.
+        # Attached AFTER new_page() so it never fires for our own page.
+        self._context.on("page", self._on_popup)
 
         # Block video/audio and web font requests — pure memory/bandwidth/latency
         # cost with zero QA signal. Fonts in particular can hang a page load (a
@@ -100,6 +127,19 @@ class BrowserSession:
             await route.abort()
         else:
             await route.continue_()
+
+    def _on_popup(self, page) -> None:
+        """Close any tab that isn't the one page the agent drives (single-tab)."""
+        if page is self._page:
+            return
+        asyncio.create_task(self._close_popup(page))
+
+    async def _close_popup(self, page) -> None:
+        try:
+            await page.close()
+            logger.debug("Closed an unexpected popup/new tab (single-tab memory profile)")
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Popup close failed (ignored): %s", exc)
 
     async def __aexit__(self, *args):
         try:

@@ -1,6 +1,6 @@
 # Shadow QA
 
-**Autonomous visual QA agent — self-hosted Gemma 4 on AMD MI300X + Fireworks AI reporting**
+**Autonomous visual QA agent — Gemma 4 on Ollama Cloud + Fireworks AI reporting**
 
 Shadow QA is pointed at a URL and explores it like a real user would: clicking buttons, filling
 forms, scrolling, following links. A multimodal model *sees* the screen at every step and catches
@@ -18,7 +18,7 @@ Built for Track 3 ("Unicorn") of the AMD Developer Hackathon: ACT II.
 - [Quick start](#quick-start)
 - [Environment variables](#environment-variables)
 - [Architecture](#architecture)
-- [How we used AMD](#how-we-used-amd)
+- [The VLM backend — Ollama Cloud](#the-vlm-backend--ollama-cloud)
 - [Fireworks AI — used separately, for reporting only](#fireworks-ai--used-separately-for-reporting-only)
 - [Repository layout](#repository-layout)
 - [Testing](#testing)
@@ -85,11 +85,11 @@ GPU/API calls regardless of what's in your `.env`.
 Copy `.env.example` to `.env` and fill in what you need — `.env` is gitignored and never committed.
 
 ```bash
-# ---------- VLM / Vision-Decision layer (AMD vLLM on MI300X) ----------
-MOCK_VLM=true                                   # true = zero-GPU deterministic mock loop (default)
-VLM_BASE_URL=http://<droplet-ip>:8000/v1        # self-hosted vLLM OpenAI-compatible endpoint
-VLM_MODEL_ID=google/gemma-4-26B-A4B-it          # never hardcoded — swap models in one line
-VLM_API_KEY=changeme                            # any non-empty string unless vLLM's --api-key is set
+# ---------- VLM / Vision-Decision layer (Ollama Cloud) ----------
+MOCK_VLM=true                                   # true = zero-cost deterministic mock loop (default)
+VLM_BASE_URL=http://host.docker.internal:11434/v1   # Ollama Cloud, OpenAI-compatible endpoint
+VLM_MODEL_ID=gemma4:31b-cloud                   # never hardcoded — swap models in one line
+VLM_API_KEY=ollama                              # Ollama Cloud API key
 
 # ---------- Fireworks AI (report-writing step ONLY) ----------
 FIREWORKS_API_KEY=                              # empty = Fireworks client returns a stub report
@@ -100,13 +100,13 @@ MAX_STEPS_PER_RUN=20
 MAX_SECONDS_PER_RUN=240                         # bump for slower/cloud model endpoints
 
 # ---------- Database ----------
-DATABASE_URL=sqlite:///./shadowqa.db
+DATABASE_URL=sqlite:///./shadowqa.db           # set to a Neon postgres:// URL in production
 ```
 
 `MOCK_VLM=true` is the default and is all you need to see the full loop, dashboard, and reporting
-pipeline end-to-end at zero cost. Flip it to `false` and point `VLM_BASE_URL` at a real
-OpenAI-compatible vision endpoint to run the agent for real — see
-[How we used AMD](#how-we-used-amd) for the supported production path.
+pipeline end-to-end at zero cost. Flip it to `false` and point `VLM_BASE_URL` at your Ollama Cloud
+endpoint to run the agent for real — see
+[The VLM backend — Ollama Cloud](#the-vlm-backend--ollama-cloud) below.
 
 ---
 
@@ -144,8 +144,8 @@ Target Web App → Playwright (screenshot, act) ⇄ Gemma 4 (perceive, decide ne
 4. Compile every `Finding` into a polished bug report via Fireworks AI (see below).
 5. Persist the run, findings, and reports; the dashboard reflects the final state.
 
-**Structured output.** The VLM is called with a JSON-schema `response_format` constraint (OpenAI/
-vLLM-compatible `guided_json`/`json_schema` decoding) so its response is always valid JSON matching
+**Structured output.** The VLM is called with a JSON `response_format` constraint (the
+OpenAI-compatible JSON mode Ollama Cloud supports) so its response is valid JSON matching
 the `AgentStep` schema — no free-text parsing, no flaky regexes. A markdown-fence/embedded-JSON
 fallback parser exists for the rare case a model adds decoration despite the constraint.
 
@@ -180,46 +180,42 @@ class AgentStep(BaseModel):
 
 ---
 
-## How we used AMD
+## The VLM backend — Ollama Cloud
 
 The vision/decision step of the agent loop — the model that looks at each screenshot and decides
-what's broken and what to do next — is architected to run **self-hosted on AMD**, never proxied
-through a third-party inference API. This separation is deliberate and enforced in code:
-`vlm_client.py` is the *only* file that ever calls the vision/decision model, and it always reads
-the endpoint from `VLM_BASE_URL` rather than hardcoding anything.
+what's broken and what to do next — runs on **Ollama Cloud**, an OpenAI-compatible hosted endpoint.
+The integration is enforced in code: `vlm_client.py` is the *only* file that ever calls the
+vision/decision model, and it always reads the endpoint from `VLM_BASE_URL` rather than hardcoding
+anything.
 
-**The supported production path:**
+**The production path:**
 
-- **Hardware:** an AMD **MI300X** GPU droplet.
-- **Serving stack:** [vLLM](https://github.com/vllm-project/vllm)'s OpenAI-compatible server, run
-  via the ROCm image `vllm/vllm-openai-rocm:gemma4` (see `scripts/start_vlm_rocm.sh`).
-- **Model:** Gemma 4 26B-MoE (`google/gemma-4-26B-A4B-it`) — the model ID is always an env var
-  (`VLM_MODEL_ID`), never hardcoded, so it can be swapped in one change if needed.
-- **Structured decoding:** vLLM's guided/structured-output support (`guided_json` /
-  `response_format`) forces the model to always return valid JSON matching the `AgentStep` schema,
-  rather than relying on prompt-only compliance.
-- **Launch:** `scripts/start_vlm_rocm.sh` — pulls and runs the ROCm vLLM image with the MI300X GPU
-  devices (`/dev/kfd`, `/dev/dri`) passed through, serving on port 8000. Once it's up, set in
-  `.env`:
+- **Provider:** [Ollama Cloud](https://ollama.com/) — OpenAI-compatible chat-completions API.
+- **Model:** Gemma 4 (`gemma4:31b-cloud`) — the model ID is always an env var (`VLM_MODEL_ID`),
+  never hardcoded, so it can be swapped to any other vision-capable model in one change.
+- **Structured decoding:** the OpenAI-compatible `response_format` (JSON mode) forces the model to
+  return valid JSON matching the `AgentStep` schema, backed by a defensive markdown-fence/embedded-JSON
+  fallback parser — no reliance on prompt-only compliance.
+- **Config:** flip `MOCK_VLM=false` and set:
   ```
   MOCK_VLM=false
-  VLM_BASE_URL=http://<droplet-ip>:8000/v1
-  VLM_MODEL_ID=google/gemma-4-26B-A4B-it
-  VLM_API_KEY=changeme
+  VLM_BASE_URL=http://host.docker.internal:11434/v1
+  VLM_MODEL_ID=gemma4:31b-cloud
+  VLM_API_KEY=ollama
   ```
   Then validate against the bundled fixture app with `docker compose exec backend pytest
   tests/integration/test_vlm_phase1.py -v -s`.
 
-**Validation status, honestly stated.** GPU credits for this hackathon are limited (~50 hours
-total), so day-to-day development and prompt/plumbing iteration in this repo's history were done
-against `MOCK_VLM=true` (zero GPU cost) and, for interim real-model testing against the fixture
-app, an Ollama Cloud endpoint (`gemma4:31b-cloud`) as a temporary stand-in for the MI300X — not the
-real AMD droplet. The self-hosted-vLLM-on-MI300X path described above is fully built (scripts, env
-plumbing, structured decoding, retries) and is the architecture this project is designed and
-intended to run on, but a live run against the actual MI300X droplet had not yet been executed as
-of this write-up. **Confirming a real run against the MI300X/vLLM endpoint before final submission
-is required** — it's what the hackathon's AMD-usage bonus eligibility depends on; validating only
-against Ollama Cloud does not satisfy that requirement.
+**Deployment.** The backend (this VLM client, Playwright, the API, SQLite/Neon) runs on the
+**Render free tier (512MB RAM)**; the frontend is on Vercel. Playwright's Chromium is tuned for that
+512MB ceiling (see `backend/app/agent/browser.py`): site-isolation disabled, a single renderer
+process, a capped V8 heap, media/font requests blocked, JPEG screenshots, and single-tab enforcement.
+
+> **Note on AMD:** this project was built for the AMD Developer Hackathon (Track 3). An earlier
+> design targeted self-hosted Gemma 4 on an AMD MI300X via vLLM/ROCm, and `scripts/start_vlm_rocm.sh`
+> remains in the repo as an optional way to run that path. The **final production architecture
+> deliberately uses Ollama Cloud instead** — a decision that trades away the AMD hardware-usage bonus
+> in exchange for a zero-provisioning, always-available hosted backend.
 
 ---
 
@@ -227,8 +223,8 @@ against Ollama Cloud does not satisfy that requirement.
 
 Fireworks AI is used for exactly one thing: turning a `Finding` (a raw anomaly description +
 severity + category + action trail) into a polished, human-readable markdown bug report. It is
-**never** involved in perceiving the screen or deciding what the agent does next — that's the AMD
-vLLM path above, and the two are kept structurally separate:
+**never** involved in perceiving the screen or deciding what the agent does next — that's the
+Ollama Cloud VLM path above, and the two are kept structurally separate:
 
 - `backend/app/agent/vlm_client.py` — the *only* place the vision/decision model is called.
 - `backend/app/reporting/fireworks_client.py` — the *only* place Fireworks AI is called.
@@ -276,7 +272,7 @@ shadow-qa/
 ├── fixture-app/                  # intentionally-broken demo target
 │   └── BUGS.md                   # answer key for the seeded bugs
 └── scripts/
-    ├── start_vlm_rocm.sh         # launch vLLM on the AMD MI300X droplet
+    ├── start_vlm_rocm.sh         # OPTIONAL/legacy: self-host on AMD MI300X (not the production path)
     ├── start_ollama.sh           # local/interim model serving for dev iteration
     └── test_smoke.sh             # docker compose up → /health → teardown
 ```
@@ -290,7 +286,7 @@ shadow-qa/
 docker compose run --rm -e MOCK_VLM=true backend \
   python -m pytest tests/unit tests/integration/test_fixture_loop.py -v
 
-# Real-VLM validation (requires a live endpoint — see "How we used AMD" above)
+# Real-VLM validation (requires a live endpoint — see "The VLM backend" above)
 docker compose exec backend pytest tests/integration/test_vlm_phase1.py -v -s
 ```
 
@@ -306,7 +302,7 @@ Coverage:
   bugs catalogued in `fixture-app/BUGS.md`.
 - **Smoke:** `scripts/test_smoke.sh` — full `docker compose up` → `/health` → teardown.
 
-Real AMD or Fireworks endpoints are never called from unit tests or CI — `MOCK_VLM=true` and a stub
+Real Ollama Cloud or Fireworks endpoints are never called from unit tests or CI — `MOCK_VLM=true` and a stub
 Fireworks client cover that path.
 
 ---
@@ -329,8 +325,6 @@ Fireworks client cover that path.
 
 ## Known gaps / next steps
 
-- Real validation against the AMD MI300X/vLLM endpoint is still required before final submission
-  — see [How we used AMD](#how-we-used-amd).
 - The bundled `fixture-app` can't be targeted through the public dashboard/API (only from test code
   calling the agent loop directly) because its Docker-internal address falls inside the SSRF
   guard's blocked private-IP range — this is expected, not a bug, but worth knowing when demoing.
