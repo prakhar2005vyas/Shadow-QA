@@ -12,6 +12,7 @@ architecturally distinct, and documented in README.md.
 """
 
 import logging
+import os
 
 import httpx
 from tenacity import (
@@ -26,7 +27,26 @@ from ..config import settings
 
 logger = logging.getLogger(__name__)
 
-_FIREWORKS_BASE_URL = "https://api.fireworks.ai/inference/v1"
+_DEFAULT_TEST_NAME = "shadow-qa-run"
+
+
+def _gateway_headers() -> dict[str, str]:
+    """
+    Build common HTTP headers for every Fireworks (reporting) gateway request.
+
+    X-Test-Name is stamped by the pytest conftest fixture during test execution.
+    Outside pytest the env var is absent and the call falls back to the
+    service-level default — no KeyError, no crash.
+    """
+    return {
+        "Authorization": f"Bearer {settings.openai_api_key}",
+        "Content-Type": "application/json",
+        "X-Test-Name": os.getenv("LLM_GATEWAY_TEST_NAME", _DEFAULT_TEST_NAME),
+    }
+
+
+# Reporting endpoint routes through the same OpenAI-compatible gateway as the VLM.
+# Override via OPENAI_BASE_URL in the environment (e.g. point at a LiteLLM proxy).
 
 
 @retry(
@@ -60,16 +80,8 @@ async def generate_report_text(
     Raises:
         httpx.HTTPStatusError: If Fireworks returns an error after retries.
     """
-    if not settings.fireworks_api_key:
-        logger.warning(
-            "FIREWORKS_API_KEY not set — returning stub report (Phase 0 behaviour)"
-        )
-        return (
-            f"**[STUB — Fireworks not configured]**\n\n"
-            f"**Severity:** {severity}\n"
-            f"**Category:** {category}\n\n"
-            f"{bug_description}"
-        )
+    # Gateway key is always present (has a default), so no stub guard needed.
+    # If MOCK_VLM=true the agent loop never reaches this function anyway.
 
     trail_text = "\n".join(f"- {a}" for a in action_trail[-5:]) or "_(no prior actions)_"
     prompt = f"""You are a senior QA engineer writing a structured bug report for a development team.
@@ -99,12 +111,9 @@ Keep it concise. Do not add a preamble or closing remarks."""
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.post(
-            f"{_FIREWORKS_BASE_URL}/chat/completions",
+            f"{settings.openai_base_url}/chat/completions",
             json=payload,
-            headers={
-                "Authorization": f"Bearer {settings.fireworks_api_key}",
-                "Content-Type": "application/json",
-            },
+            headers=_gateway_headers(),
         )
         response.raise_for_status()
 

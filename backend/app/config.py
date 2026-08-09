@@ -1,21 +1,30 @@
 """
 Application settings loaded from environment variables / .env file.
 Everything model/endpoint-related is an env var — nothing is hardcoded.
+
+Both the VLM (vision/decision) and the reporting (Fireworks) clients route
+through the same local OpenAI-compatible gateway, configured via
+OPENAI_BASE_URL / OPENAI_API_KEY.  Swap the gateway by changing those two
+env vars — no code changes needed.
 """
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    # ---------- VLM / Vision-Decision layer (AMD vLLM, NEVER Fireworks) ----------
+    # ---------- Unified OpenAI-compatible gateway ----------
+    # Both the VLM client and the Fireworks reporting client hit this gateway.
+    # Set OPENAI_BASE_URL / OPENAI_API_KEY in .env (or the environment) to
+    # redirect traffic to any compatible proxy, LiteLLM instance, etc.
+    openai_base_url: str = "http://localhost:8000/v1"
+    openai_api_key: str = "my_secure_local_password"
+
+    # ---------- VLM / Vision-Decision layer (NEVER Fireworks) ----------
     mock_vlm: bool = True
-    vlm_base_url: str = "http://placeholder:8000/v1"
-    vlm_model_id: str = "google/gemma-4-26B-A4B-it"
-    vlm_api_key: str = "changeme"
+    vlm_model_id: str = "gemma-4"
 
     # ---------- Fireworks AI (report-writing step ONLY) ----------
-    fireworks_api_key: str = ""
-    fireworks_model_id: str = "accounts/fireworks/models/llama-v3p3-70b-instruct"
+    fireworks_model_id: str = "llama-3.3-70b-versatile"
 
     # ---------- Agent budget ----------
     max_steps_per_run: int = 20

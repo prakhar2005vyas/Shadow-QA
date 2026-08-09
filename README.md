@@ -93,7 +93,7 @@ VLM_API_KEY=ollama                              # Ollama Cloud API key
 
 # ---------- Fireworks AI (report-writing step ONLY) ----------
 FIREWORKS_API_KEY=                              # empty = Fireworks client returns a stub report
-FIREWORKS_MODEL_ID=accounts/fireworks/models/llama-v3p3-70b-instruct
+FIREWORKS_MODEL_ID=llama-3.3-70b-versatile
 
 # ---------- Agent budget ----------
 MAX_STEPS_PER_RUN=20
@@ -231,7 +231,7 @@ Ollama Cloud VLM path above, and the two are kept structurally separate:
 
 `compiler.py` calls `fireworks_client.generate_report_text()` once per `Finding` after a run
 completes, with the OpenAI-compatible endpoint `https://api.fireworks.ai/inference/v1` and model
-ID `accounts/fireworks/models/llama-v3p3-70b-instruct` (also an env var, `FIREWORKS_MODEL_ID`). If
+ID `llama-3.3-70b-versatile` (also an env var, `FIREWORKS_MODEL_ID`). If
 `FIREWORKS_API_KEY` is unset, it returns a labeled stub report instead of failing — this is what
 lets the full pipeline run end-to-end with zero external API calls in `MOCK_VLM=true` mode and in
 all automated tests.

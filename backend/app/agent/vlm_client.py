@@ -9,6 +9,7 @@ Design rules (from spec):
 """
 
 import logging
+import os
 import time
 from typing import Optional
 
@@ -26,6 +27,23 @@ from .schemas import AgentStep, NextAction
 from .mock_vlm import get_mock_step
 
 logger = logging.getLogger(__name__)
+
+_DEFAULT_TEST_NAME = "shadow-qa-run"
+
+
+def _gateway_headers() -> dict[str, str]:
+    """
+    Build the common HTTP headers for every VLM gateway request.
+
+    X-Test-Name is populated from the LLM_GATEWAY_TEST_NAME env var, which the
+    pytest conftest fixture stamps with the running test's node name.  Outside
+    pytest the variable is absent, so the value falls back to the service-level
+    default — no KeyError, no crash.
+    """
+    return {
+        "Authorization": f"Bearer {settings.openai_api_key}",
+        "X-Test-Name": os.getenv("LLM_GATEWAY_TEST_NAME", _DEFAULT_TEST_NAME),
+    }
 
 
 def _build_prompt(
@@ -154,9 +172,9 @@ async def _call_real_vlm(
     t0 = time.perf_counter()
     async with httpx.AsyncClient(timeout=120.0) as client:
         response = await client.post(
-            f"{settings.vlm_base_url}/chat/completions",
+            f"{settings.openai_base_url}/chat/completions",
             json=payload,
-            headers={"Authorization": f"Bearer {settings.vlm_api_key}"},
+            headers=_gateway_headers(),
         )
         response.raise_for_status()
     elapsed_ms = (time.perf_counter() - t0) * 1000
