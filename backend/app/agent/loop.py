@@ -87,6 +87,10 @@ GOAL = (
 # page hasn't).
 _SHADOW_ID_RE = re.compile(r"\[data-shadow-id='\d+'\]")
 _ALREADY_TRIED_RE = re.compile(r"\s*\[ALREADY_TRIED\]")
+# Maximum consecutive forced go_backs before the run is terminated.
+# 3 is enough to walk back through a realistic navigation stack; beyond that
+# the agent is just bouncing between exhausted states wasting its step budget.
+_MAX_CONSECUTIVE_GO_BACKS = 3
 
 
 def _compute_state_id(url: str, dom_summary: str) -> str:
@@ -130,6 +134,9 @@ async def run_agent(run_id: int, target_url: str, db_session: Session) -> None:
     start_time = time.monotonic()
     # State memory graph for loop prevention: state_id -> number of visits.
     state_visit_counts: dict[str, int] = {}
+    # Consecutive forced go_back counter — when this hits _MAX_CONSECUTIVE_GO_BACKS
+    # the run is stopped instead of issuing yet another go_back to nowhere.
+    consecutive_go_backs = 0
     cancelled = False
 
     try:
@@ -252,14 +259,54 @@ async def run_agent(run_id: int, target_url: str, db_session: Session) -> None:
 
                 if is_repeat_state and _is_state_exhausted(dom_summary):
                     # Every element at this state has already been tried and we've
-                    # looped back to it anyway — force a go_back instead of spending
-                    # a VLM call asking a question we already know the answer to.
+                    # looped back to it anyway.
+
+                    if consecutive_go_backs >= _MAX_CONSECUTIVE_GO_BACKS:
+                        # We've already forced go_back N times in a row and keep
+                        # landing on exhausted states — stop the run instead of
+                        # burning the remaining step budget doing nothing.
+                        logger.info(
+                            "Run %d step %d — %d consecutive forced go_backs reached, forcing stop",
+                            run_id,
+                            step_index,
+                            consecutive_go_backs,
+                        )
+                        forced_action = NextAction(
+                            type="stop",
+                            selector=None,
+                            value=None,
+                            reason="Loop prevention: maximum consecutive go_back limit reached, ending run",
+                        )
+                        action_history.append(
+                            f"step {step_index}: stop — [LOOP PREVENTION] {consecutive_go_backs} consecutive go_backs, ending run"
+                        )
+                        db_session.add(
+                            Step(
+                                run_id=run_id,
+                                step_num=step_index,
+                                observation=(
+                                    f"Loop prevention: {consecutive_go_backs} consecutive forced go_backs "
+                                    f"with no new states reachable. Stopping run."
+                                ),
+                                is_anomaly=False,
+                                action_type="stop",
+                                action_selector=None,
+                                action_reason=forced_action.reason,
+                                screenshot_b64=screenshot_b64,
+                            )
+                        )
+                        db_session.commit()
+                        break
+
+                    # Still under the limit — force go_back and increment counter.
                     logger.info(
-                        "Run %d step %d — state %s exhausted (visit #%d), forcing go_back",
+                        "Run %d step %d — state %s exhausted (visit #%d), forcing go_back (%d/%d)",
                         run_id,
                         step_index,
                         state_id,
                         state_visit_counts[state_id],
+                        consecutive_go_backs + 1,
+                        _MAX_CONSECUTIVE_GO_BACKS,
                     )
                     forced_action = NextAction(
                         type="go_back",
@@ -283,10 +330,14 @@ async def run_agent(run_id: int, target_url: str, db_session: Session) -> None:
                         )
                     )
                     db_session.commit()
+                    consecutive_go_backs += 1
                     result = await browser.execute_action(forced_action)
                     logger.info("Run %d step %d action result: %s", run_id, step_index, result)
                     await asyncio.sleep(0.5)
                     continue
+
+                # State is NOT exhausted — reset the consecutive go_back counter.
+                consecutive_go_backs = 0
 
                 # If we've seen this state before but it's not exhausted yet, tell the
                 # model explicitly rather than letting it wander back into a loop.

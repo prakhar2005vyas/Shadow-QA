@@ -4,7 +4,7 @@ Unit tests for the loop-prevention state memory graph helpers in agent/loop.py:
   _is_state_exhausted — true once every interactive element has [ALREADY_TRIED]
 """
 
-from app.agent.loop import _compute_state_id, _is_state_exhausted
+from app.agent.loop import _compute_state_id, _is_state_exhausted, _MAX_CONSECUTIVE_GO_BACKS
 
 _DOM_UNTRIED = (
     'selector="[data-shadow-id=\'1\']" | button#submit-btn | "Get Started Free"\n'
@@ -76,3 +76,70 @@ class TestIsStateExhausted:
     def test_false_for_empty_string(self):
         # No information either way — not confidently "exhausted".
         assert _is_state_exhausted("") is False
+
+
+class TestMaxConsecutiveGoBackGuard:
+    """
+    Regression test for the infinite go_back loop fix.
+
+    Simulates the loop logic that decides between go_back and stop when hitting
+    consecutive exhausted states. Asserts that the 4th exhausted-state hit
+    (after 3 consecutive go_backs) triggers a stop, not a 4th go_back.
+    """
+
+    def test_constant_is_three(self):
+        assert _MAX_CONSECUTIVE_GO_BACKS == 3
+
+    def test_stop_forced_after_max_consecutive_go_backs(self):
+        """
+        Simulate the in-loop decision: after exactly _MAX_CONSECUTIVE_GO_BACKS
+        consecutive exhausted states (each triggering a go_back), the next
+        exhausted state must trigger a stop instead.
+        """
+        consecutive_go_backs = 0
+        actions: list[str] = []
+
+        # Simulate 4+ exhausted states hitting the guard logic
+        for i in range(6):
+            is_repeat_and_exhausted = True  # every state is exhausted
+            if is_repeat_and_exhausted:
+                if consecutive_go_backs >= _MAX_CONSECUTIVE_GO_BACKS:
+                    actions.append("stop")
+                    break
+                else:
+                    actions.append("go_back")
+                    consecutive_go_backs += 1
+
+        # Should have exactly 3 go_backs then 1 stop
+        assert actions == ["go_back", "go_back", "go_back", "stop"]
+        assert consecutive_go_backs == 3
+
+    def test_counter_resets_on_non_exhausted_state(self):
+        """
+        If a productive (non-exhausted) step occurs in between, the counter
+        should reset, allowing another 3 go_backs before stopping.
+        """
+        consecutive_go_backs = 0
+        actions: list[str] = []
+
+        # 2 exhausted, then 1 productive, then 4 more exhausted
+        sequence = [True, True, False, True, True, True, True]
+        for exhausted in sequence:
+            if exhausted:
+                if consecutive_go_backs >= _MAX_CONSECUTIVE_GO_BACKS:
+                    actions.append("stop")
+                    break
+                else:
+                    actions.append("go_back")
+                    consecutive_go_backs += 1
+            else:
+                consecutive_go_backs = 0
+                actions.append("productive")
+
+        # After reset: 2 go_backs, productive, 3 go_backs, then stop
+        assert actions == [
+            "go_back", "go_back",
+            "productive",
+            "go_back", "go_back", "go_back",
+            "stop",
+        ]
