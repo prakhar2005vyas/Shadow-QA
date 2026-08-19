@@ -125,6 +125,13 @@ async def run_agent(run_id: int, target_url: str, db_session: Session) -> None:
     db_session.add(run)
     db_session.commit()
 
+    if settings.mock_vlm and target_url != settings.fixture_url:
+        logger.warning(
+            "Run %d — MOCK_VLM is True but target URL is %r. "
+            "This run will return canned fixture-app findings regardless of the real target URL.",
+            run_id, target_url
+        )
+
     action_history: list[str] = []
     tried_selectors: set[str] = set()
     reported_anomalies: list[str] = []
@@ -171,6 +178,7 @@ async def run_agent(run_id: int, target_url: str, db_session: Session) -> None:
                         action_selector=None,
                         action_reason="target URL unreachable",
                         screenshot_b64=None,
+                        is_mock=settings.mock_vlm,
                     )
                 )
                 finding = Finding(
@@ -180,6 +188,7 @@ async def run_agent(run_id: int, target_url: str, db_session: Session) -> None:
                     severity="critical",
                     category="error_state",
                     screenshot_b64=None,
+                    is_mock=settings.mock_vlm,
                 )
                 db_session.add(finding)
                 db_session.commit()
@@ -242,6 +251,7 @@ async def run_agent(run_id: int, target_url: str, db_session: Session) -> None:
                             action_selector=None,
                             action_reason="screenshot timeout",
                             screenshot_b64=None,
+                            is_mock=settings.mock_vlm,
                         )
                     )
                     db_session.commit()
@@ -293,6 +303,7 @@ async def run_agent(run_id: int, target_url: str, db_session: Session) -> None:
                                 action_selector=None,
                                 action_reason=forced_action.reason,
                                 screenshot_b64=screenshot_b64,
+                                is_mock=settings.mock_vlm,
                             )
                         )
                         db_session.commit()
@@ -327,6 +338,7 @@ async def run_agent(run_id: int, target_url: str, db_session: Session) -> None:
                             action_selector=None,
                             action_reason=forced_action.reason,
                             screenshot_b64=screenshot_b64,
+                            is_mock=settings.mock_vlm,
                         )
                     )
                     db_session.commit()
@@ -386,6 +398,7 @@ async def run_agent(run_id: int, target_url: str, db_session: Session) -> None:
                             action_selector=agent_step.next_action.selector,
                             action_reason=agent_step.next_action.reason,
                             screenshot_b64=screenshot_b64,
+                            is_mock=settings.mock_vlm,
                         )
                     )
                     db_session.commit()
@@ -403,6 +416,7 @@ async def run_agent(run_id: int, target_url: str, db_session: Session) -> None:
                         console_errors_json=json.dumps(browser.console_errors),
                         network_errors_json=json.dumps(browser.network_errors),
                         action_trail_json=json.dumps(action_history),
+                        is_mock=settings.mock_vlm,
                     )
                     db_session.add(finding)
                     db_session.commit()
@@ -465,6 +479,7 @@ async def run_agent(run_id: int, target_url: str, db_session: Session) -> None:
                         action_selector=action.selector,
                         action_reason=action.reason,
                         screenshot_b64=screenshot_b64,
+                        is_mock=settings.mock_vlm,
                     )
                 )
                 db_session.commit()

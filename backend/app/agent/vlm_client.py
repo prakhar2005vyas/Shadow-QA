@@ -46,6 +46,16 @@ def _gateway_headers() -> dict[str, str]:
     }
 
 
+def _vlm_headers() -> dict[str, str]:
+    """
+    Build the common HTTP headers for the dedicated VLM endpoint.
+    """
+    return {
+        "Authorization": f"Bearer {settings.openai_api_key}",
+        "X-Test-Name": os.getenv("LLM_GATEWAY_TEST_NAME", _DEFAULT_TEST_NAME),
+    }
+
+
 def _build_prompt(
     dom_summary: str,
     goal: str,
@@ -150,7 +160,7 @@ async def _call_real_vlm(
                 "content": [
                     {
                         "type": "image_url",
-                        "image_url": {"url": f"data:image/png;base64,{screenshot_b64}"},
+                        "image_url": {"url": f"data:image/jpeg;base64,{screenshot_b64}"},
                     },
                     {"type": "text", "text": prompt},
                 ],
@@ -158,15 +168,6 @@ async def _call_real_vlm(
         ],
         "max_tokens": 512,
         "temperature": 0.1,
-        # response_format (OpenAI/Ollama standard) replaces guided_json (vLLM-only) for local Ollama compatibility
-        "response_format": {
-            "type": "json_schema",
-            "json_schema": {
-                "name": "AgentStep",
-                "schema": AgentStep.model_json_schema(),
-                "strict": True,
-            },
-        },
     }
 
     t0 = time.perf_counter()
@@ -174,7 +175,7 @@ async def _call_real_vlm(
         response = await client.post(
             f"{settings.openai_base_url}/chat/completions",
             json=payload,
-            headers=_gateway_headers(),
+            headers=_vlm_headers(),
         )
         response.raise_for_status()
     elapsed_ms = (time.perf_counter() - t0) * 1000

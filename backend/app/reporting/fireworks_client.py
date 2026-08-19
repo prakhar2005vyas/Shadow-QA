@@ -57,6 +57,7 @@ def _gateway_headers() -> dict[str, str]:
     reraise=True,
 )
 async def generate_report_text(
+    target_url: str,
     bug_description: str,
     severity: str,
     category: str,
@@ -87,6 +88,7 @@ async def generate_report_text(
     prompt = f"""You are a senior QA engineer writing a structured bug report for a development team.
 Based on the information below, write a clear, concise, actionable bug report in markdown.
 
+**Target URL:** {target_url}
 **Bug description:** {bug_description}
 **Severity:** {severity}
 **Category:** {category}

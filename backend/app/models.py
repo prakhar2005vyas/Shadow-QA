@@ -48,6 +48,7 @@ class Step(SQLModel, table=True):
     action_selector: Optional[str] = None
     action_reason: str
     created_at: datetime = Field(default_factory=datetime.utcnow)
+    is_mock: bool = Field(default=False)
 
     # Screenshot stored as base64-encoded PNG, same convention as Finding.screenshot_b64
     screenshot_b64: Optional[str] = Field(default=None)
@@ -64,6 +65,7 @@ class Finding(SQLModel, table=True):
     description: str
     severity: str   # low | medium | high | critical
     category: str   # broken_interaction | visual_layout | accessibility | error_state | dead_link | other
+    is_mock: bool = Field(default=False)
 
     # Screenshot stored as base64-encoded PNG
     screenshot_b64: Optional[str] = Field(default=None)
